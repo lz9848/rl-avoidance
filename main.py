@@ -56,7 +56,6 @@ def train_avd_PPO():
         net_arch=[512, 256, 256],
         features_dim=features_dim,
         model_dim=128,
-        n_head=4
     )
 
     custom_hyperparams = {
