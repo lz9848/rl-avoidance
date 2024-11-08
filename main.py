@@ -61,7 +61,7 @@ def train_avd_PPO():
 
     custom_hyperparams = {
         "policy_kwargs": policy_kwargs,
-        "learning_rate": 0.00005,
+        "learning_rate": 0.0001,
         "n_steps": rollout_len,
         "batch_size": 512,
         "n_epochs": 3,

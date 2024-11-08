@@ -16,7 +16,7 @@ class AvdEnvVecObs(gym.Env):
 
         self.game_path = "./avdgym"
         if self.eval:
-            self.game_exe = "rl-eval-8.exe"
+            self.game_exe = "rl-eval-15.exe"
         else:
             self.game_exe = "rl-hitmode-8.exe"
 

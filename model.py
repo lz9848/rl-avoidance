@@ -25,37 +25,36 @@ class AttenionBlock(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, encode_dim, d_k, n_head):
+    def __init__(self, encode_dim, model_dim, n_head):
         super(MultiHeadAttention, self).__init__()
 
         self.n_head = n_head
-        self.d_k = d_k
-        self.w_q = nn.Linear(encode_dim, self.d_k * self.n_head)
-        self.w_k = nn.Linear(encode_dim, self.d_k * self.n_head)
-        self.w_v = nn.Linear(encode_dim, self.d_k * self.n_head)
+        self.d_model = model_dim
+        self.w_q = nn.Linear(encode_dim, self.d_model * self.n_head)
+        self.w_k = nn.Linear(encode_dim, self.d_model * self.n_head)
+        self.w_v = nn.Linear(encode_dim, encode_dim)
         self.softmax = nn.Softmax(dim=-1)
-        self.combine = nn.Linear(self.d_model * self.n_head, encode_dim)
 
     def forward(self, seq1, seq2, mask=None):
         batch, seq_num, dimension = seq2.shape
         q, k, v = self.w_q(seq1), self.w_k(seq2), self.w_v(seq2)
+        n_v = dimension // self.n_head
 
-        q = q.view(batch, 1, self.n_head, self.d_k).permute(0, 2, 1, 3)
-        k = k.view(batch, seq_num, self.n_head, self.d_k).permute(0, 2, 1, 3)
-        v = v.view(batch, seq_num, self.n_head, self.d_k).permute(0, 2, 1, 3)
+        q = q.view(batch, 1, self.n_head, self.d_model).permute(0, 2, 1, 3)
+        k = k.view(batch, seq_num, self.n_head, self.d_model).permute(0, 2, 1, 3)
+        v = v.view(batch, seq_num, self.n_head, n_v).permute(0, 2, 1, 3)
 
-        score = q @ k.transpose(2, 3) / math.sqrt(self.d_k)
+        score = q @ k.transpose(2, 3) / math.sqrt(self.d_model)
         if mask is not None:
             score = score.masked_fill(mask == 0, -1e9)
         score = self.softmax(score) @ v
-        score = score.permute(0, 2, 1, 3).contiguous().view(batch, 1, self.d_k * self.n_head)
-        output = self.combine(score)
+        score = score.permute(0, 2, 1, 3).contiguous().view(batch, 1, dimension)
 
-        return output
+        return score
 
 
 class AvoidanceExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space: gym.spaces, features_dim: int = 256, d_k: int = 128, n_head: int = 4):
+    def __init__(self, observation_space: gym.spaces, features_dim: int = 256, model_dim: int = 128, n_head: int = 4):
         super(AvoidanceExtractor, self).__init__(observation_space, features_dim)
         self.player_size = 9
         self.bullet_size = 6
@@ -74,7 +73,7 @@ class AvoidanceExtractor(BaseFeaturesExtractor):
             nn.ReLU(True),
         )
         # self.attention = AttenionBlock(encode_dim=features_dim, model_dim=model_dim)
-        self.attention = MultiHeadAttention(encode_dim=features_dim, d_k=d_k, n_head=n_head)
+        self.attention = MultiHeadAttention(encode_dim=features_dim, model_dim=model_dim, n_head=n_head)
         self.relu = nn.ReLU()
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
@@ -97,10 +96,10 @@ class AvoidanceExtractor(BaseFeaturesExtractor):
 
 
 class CustomActorCriticPolicy(ActorCriticPolicy):
-    def __init__(self, observation_space, action_space, lr_schedule, features_dim, d_k, n_head, **kwargs):
+    def __init__(self, observation_space, action_space, lr_schedule, features_dim, model_dim, **kwargs):
         super(CustomActorCriticPolicy, self).__init__(
             observation_space, action_space, lr_schedule,
             features_extractor_class=AvoidanceExtractor,
-            features_extractor_kwargs=dict(features_dim=features_dim, d_k=d_k, n_head=n_head),
+            features_extractor_kwargs=dict(features_dim=features_dim, model_dim=model_dim),
             **kwargs
         )
