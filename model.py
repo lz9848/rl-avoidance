@@ -25,36 +25,40 @@ class AttenionBlock(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, encode_dim, model_dim, n_head):
+    def __init__(self, encode_dim, d_k, n_head):
         super(MultiHeadAttention, self).__init__()
 
         self.n_head = n_head
-        self.d_model = model_dim
-        self.w_q = nn.Linear(encode_dim, self.d_model * self.n_head)
-        self.w_k = nn.Linear(encode_dim, self.d_model * self.n_head)
-        self.w_v = nn.Linear(encode_dim, encode_dim)
+        self.d_k = d_k
+        self.w_q = nn.Linear(encode_dim, self.d_k * self.n_head)
+        self.w_k = nn.Linear(encode_dim, self.d_k * self.n_head)
+        self.w_v = nn.Linear(encode_dim, self.d_k * self.n_head)
         self.softmax = nn.Softmax(dim=-1)
+        self.combine = nn.Linear(self.d_k * self.n_head, encode_dim)
+        total_params = sum(p.numel() for p in self.parameters())
+        print(f"模块参数量: {total_params}")
 
     def forward(self, seq1, seq2, mask=None):
-        batch, seq_num, dimension = seq2.shape
+        batch, seq1_len, dimension = seq1.shape
+        _, seq2_len, _ = seq2.shape
         q, k, v = self.w_q(seq1), self.w_k(seq2), self.w_v(seq2)
-        n_v = dimension // self.n_head
 
-        q = q.view(batch, 1, self.n_head, self.d_model).permute(0, 2, 1, 3)
-        k = k.view(batch, seq_num, self.n_head, self.d_model).permute(0, 2, 1, 3)
-        v = v.view(batch, seq_num, self.n_head, n_v).permute(0, 2, 1, 3)
+        q = q.view(batch, seq1_len, self.n_head, self.d_k).permute(0, 2, 1, 3)
+        k = k.view(batch, seq2_len, self.n_head, self.d_k).permute(0, 2, 1, 3)
+        v = v.view(batch, seq2_len, self.n_head, self.d_k).permute(0, 2, 1, 3)
 
-        score = q @ k.transpose(2, 3) / math.sqrt(self.d_model)
+        score = q @ k.transpose(2, 3) / math.sqrt(self.d_k)
         if mask is not None:
             score = score.masked_fill(mask == 0, -1e9)
         score = self.softmax(score) @ v
-        score = score.permute(0, 2, 1, 3).contiguous().view(batch, 1, dimension)
+        score = score.permute(0, 2, 1, 3).contiguous().view(batch, seq1_len, self.d_k * self.n_head)
+        output = self.combine(score)
 
-        return score
+        return output
 
 
 class AvoidanceExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space: gym.spaces, features_dim: int = 256, model_dim: int = 128, n_head: int = 4):
+    def __init__(self, observation_space: gym.spaces, features_dim: int = 256, d_k: int = 128, n_head: int = 4):
         super(AvoidanceExtractor, self).__init__(observation_space, features_dim)
         self.player_size = 9
         self.bullet_size = 6
@@ -72,8 +76,7 @@ class AvoidanceExtractor(BaseFeaturesExtractor):
             nn.Linear(features_dim, features_dim),
             nn.ReLU(True),
         )
-        # self.attention = AttenionBlock(encode_dim=features_dim, model_dim=model_dim)
-        self.attention = MultiHeadAttention(encode_dim=features_dim, model_dim=model_dim, n_head=n_head)
+        self.attention = MultiHeadAttention(encode_dim=features_dim, d_k=d_k, n_head=n_head)
         self.relu = nn.ReLU()
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
@@ -82,11 +85,14 @@ class AvoidanceExtractor(BaseFeaturesExtractor):
         player_obs = observations[:, :, :self.player_size].reshape(batch_size, 1, -1)
         bullet_obs = observations[:, :, self.player_size:].reshape((batch_size, seq_len, -1, self.bullet_size)).permute(0, 2, 1, 3).flatten(2, 3)
         mask = bullet_obs.any(-1).unsqueeze(1).unsqueeze(1).repeat(1, self.n_head, 1, 1).float()
+
         player_encode = self.player_encoder(player_obs)
         bullet_encode = self.bullet_encoder(bullet_obs)
+
         attention = self.attention(player_encode, bullet_encode, mask)
         output = player_encode + attention
 
+        # 弹幕状态全空的批次直接输出player_encode
         empty_bullet_obs = mask.sum(-1).sum(1).unsqueeze(1) == 0.0
         output = torch.where(empty_bullet_obs, player_encode, output)
         output = output.squeeze(1)
@@ -96,10 +102,14 @@ class AvoidanceExtractor(BaseFeaturesExtractor):
 
 
 class CustomActorCriticPolicy(ActorCriticPolicy):
-    def __init__(self, observation_space, action_space, lr_schedule, features_dim, model_dim, **kwargs):
+    def __init__(self, observation_space, action_space, lr_schedule, features_dim, d_k, n_head, **kwargs):
         super(CustomActorCriticPolicy, self).__init__(
             observation_space, action_space, lr_schedule,
             features_extractor_class=AvoidanceExtractor,
-            features_extractor_kwargs=dict(features_dim=features_dim, model_dim=model_dim),
+            features_extractor_kwargs=dict(features_dim=features_dim, d_k=d_k, n_head=n_head),
             **kwargs
         )
+        total_params = sum(p.numel() for p in self.parameters())
+        print(f"模型参数量: {total_params}")
+
+
