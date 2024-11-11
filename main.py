@@ -7,7 +7,7 @@ from stable_baselines3.common.monitor import Monitor
 from env import AvdEnvVecObs
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.utils import get_linear_fn
-from model import CustomActorCriticPolicy
+from model import CustomActorCriticPolicy, CustomDQNPolicy
 import os
 
 gamma = 0.95
@@ -89,6 +89,40 @@ def train_avd_PPO():
 
     model.learn(total_timesteps=(rollout_len * parallel_num * iterations), callback=callback, reset_num_timesteps=False)
     model.save(f"{exp_name}-final")
+
+
+def train_avd_DQN():
+    policy_kwargs = dict(
+        net_arch=[512, 256, ],
+        features_dim=features_dim,
+        model_dim=features_dim * 2
+    )
+
+    custom_hyperparams = {
+        "policy_kwargs": policy_kwargs,
+        "learning_rate": 5e-5,
+        "buffer_size": 1e6,
+        "batch_size": 128,
+        "gamma": gamma,
+        "exploration_fraction": 0.02,
+        "exploration_initial_eps": 0.5,
+        "exploration_final_eps": 0.01,
+        "tensorboard_log": f"./log/avoidance/DQN-{gamma}",
+        "verbose": 1,
+    }
+
+    vec_env = SubprocVecEnv([make_env for _ in range(parallel_num)])
+    if os.path.exists("model.zip"):
+        model = DQN.load("model", env=vec_env, print_system_info=True)
+    else:
+        model = DQN(CustomDQNPolicy, vec_env, **custom_hyperparams)
+
+
+    # callback = Callback_PPO(verbose=1)
+    # callback.init_callback(model)
+
+    model.learn(total_timesteps=(rollout_len * parallel_num * iterations), reset_num_timesteps=False)
+    model.save(f"dqn-{features_dim}")
 
 
 def train_atari():

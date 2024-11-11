@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import gymnasium as gym
 import math
+import numpy as np
+
+from gymnasium.vector.utils import spaces
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
@@ -89,6 +92,9 @@ class AvoidanceExtractor(BaseFeaturesExtractor):
         player_encode = self.player_encoder(player_obs)
         bullet_encode = self.bullet_encoder(bullet_obs)
 
+        # bullet_attention = self.self_attention(bullet_encode, bullet_encode)
+        # bullet_output = bullet_attention+bullet_encode
+
         attention = self.attention(player_encode, bullet_encode, mask)
         output = player_encode + attention
 
@@ -111,5 +117,4 @@ class CustomActorCriticPolicy(ActorCriticPolicy):
         )
         total_params = sum(p.numel() for p in self.parameters())
         print(f"模型参数量: {total_params}")
-
 
